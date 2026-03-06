@@ -41,6 +41,9 @@ class FoodQuery:
     nutrient_constraints: List[NutrientConstraint] = field(default_factory=list)
     dietary_tags: List[str] = field(default_factory=list)
     comparison_product: Optional[str] = None   # "healthier alternative to X"
+    excluded_ingredients: List[str] = field(default_factory=list)  # e.g. ["palm oil"]
+    detected_language: str = "en"
+    normalized_text: Optional[str] = None
     max_results: int = 10
 
     def to_dict(self) -> dict:
@@ -57,18 +60,27 @@ class FoodQuery:
                 for c in self.nutrient_constraints
             ],
             "dietary_tags": self.dietary_tags,
+            "excluded_ingredients": self.excluded_ingredients,
+            "detected_language": self.detected_language,
+            "normalized_text": self.normalized_text,
             "comparison_product": self.comparison_product,
             "max_results": self.max_results,
         }
 
     def __str__(self) -> str:
         parts = []
+        if self.detected_language:
+            parts.append(f"language = {self.detected_language}")
+        if self.normalized_text and self.normalized_text != self.raw_text.lower():
+            parts.append(f"normalized = {self.normalized_text}")
         if self.category:
             parts.append(f"category = {self.category}")
         for c in self.nutrient_constraints:
             parts.append(str(c))
         for t in self.dietary_tags:
             parts.append(f"{t} = true")
+        for ing in self.excluded_ingredients:
+            parts.append(f"no {ing}")
         if self.comparison_product:
             parts.append(f"alternative to: {self.comparison_product}")
         return "\n".join(parts) if parts else "(no constraints)"
@@ -132,6 +144,8 @@ CATEGORY_KEYWORDS: Dict[str, str] = {
     "snacks": "snacks",
     "cereal": "cereals",
     "cereals": "cereals",
+    "cerals": "cereals",  # common typo
+    "muesli": "cereals",
     "breakfast cereal": "cereals",
     "beverage": "beverages",
     "beverages": "beverages",
@@ -146,7 +160,9 @@ CATEGORY_KEYWORDS: Dict[str, str] = {
     "bread": "breads",
     "breads": "breads",
     "chocolate": "chocolates",
-    "candy": "candies",
+    "chocolates": "chocolates",
+    "choclates": "chocolates",  # common typo
+    "choco": "chocolates",
     "candies": "candies",
     "sweet": "candies",
     "cookie": "cookies",
@@ -187,6 +203,15 @@ QUALITATIVE_THRESHOLDS: Dict[str, Dict[str, Tuple[str, float]]] = {
         "sodium_100g": (">=", 0.6),
     },
     "low": {
+        "proteins_100g": ("<=", 3.0),
+        "fiber_100g": ("<=", 2.0),
+        "energy-kcal_100g": ("<=", 150.0),
+        "fat_100g": ("<=", 3.0),
+        "sugars_100g": ("<=", 5.0),
+        "sodium_100g": ("<=", 0.1),
+        "saturated-fat_100g": ("<=", 1.5),
+    },
+    "less": {
         "proteins_100g": ("<=", 3.0),
         "fiber_100g": ("<=", 2.0),
         "energy-kcal_100g": ("<=", 150.0),
@@ -258,6 +283,24 @@ class IntentParser:
         re.IGNORECASE,
     )
 
+    # Standalone calorie pattern: "350 calorie" or "350 calories" without nutrient keyword
+    _BARE_CALORIE = re.compile(
+        r"(\d+(?:\.\d+)?)\s*(kcal|cal(?:ories)?)",
+        re.IGNORECASE,
+    )
+
+    # Zero sugar / no sugar patterns: "0 added sugar", "zero sugar", "no sugar"
+    _ZERO_SUGAR_PATTERN = re.compile(
+        r"(?:0|zero|no|none)\s*(?:added\s+)?sugar",
+        re.IGNORECASE,
+    )
+
+    # Ingredient exclusion patterns: "no palm oil", "without palm oil"
+    _NO_PALM_OIL_PATTERN = re.compile(
+        r"(?:no|without|free\s+from)\s+(?:palm\s+)?oil|no\s+palm",
+        re.IGNORECASE,
+    )
+
     # "alternative to <product>" or "instead of <product>"
     _ALTERNATIVE_PATTERN = re.compile(
         r"(?:healthier\s+)?alternative\s+to\s+(.+?)(?:\s*$|[,.])",
@@ -294,6 +337,9 @@ class IntentParser:
         # 3. Dietary tags
         query.dietary_tags = self._extract_dietary_tags(lower)
 
+        # 3.5. Excluded ingredients (no palm oil, etc.)
+        query.excluded_ingredients = self._extract_excluded_ingredients(text)
+
         # 4. Nutrient constraints – explicit numeric
         constraints = self._extract_numeric_constraints(text)
 
@@ -327,6 +373,13 @@ class IntentParser:
                 if canonical not in found:
                     found.append(canonical)
         return found
+
+    def _extract_excluded_ingredients(self, text: str) -> List[str]:
+        """Extract excluded ingredients like 'no palm oil'."""
+        excluded: List[str] = []
+        if self._NO_PALM_OIL_PATTERN.search(text):
+            excluded.append("palm oil")
+        return excluded
 
     def _extract_numeric_constraints(self, text: str) -> List[NutrientConstraint]:
         constraints: List[NutrientConstraint] = []
@@ -379,8 +432,24 @@ class IntentParser:
             if field is None:
                 continue
             unit = "kcal" if unit_s.lower().startswith("kcal") or "cal" in unit_s.lower() else "g"
-            # "200 calories" without direction – treat as ceiling (context-free default)
-            _add_bare(field, "<=", float(value_s), unit)
+            # Direction: protein/fiber default to >= (more is better), others default to <=
+            direction = ">=" if field in ("proteins_100g", "fiber_100g") else "<="
+            _add_bare(field, direction, float(value_s), unit)
+
+        # Standalone calorie pattern: "350 calorie" without explicit nutrient keyword
+        for m in self._BARE_CALORIE.finditer(text):
+            # Skip if already have energy constraint
+            if any(c.nutrient == "energy-kcal_100g" for c in constraints):
+                continue
+            value_s, unit_s = m.group(1), m.group(2)
+            # Standalone calories default to <= (ceiling/upper bound)
+            _add_bare("energy-kcal_100g", "<=", float(value_s), "kcal")
+
+        # Zero sugar pattern: "0 added sugar", "zero sugar", "no sugar"
+        if self._ZERO_SUGAR_PATTERN.search(text):
+            # Skip if already have sugar constraint
+            if not any(c.nutrient == "sugars_100g" for c in constraints):
+                _add_directed("sugars_100g", "<=", 0.5, "g")  # Near-zero sugar
 
         return constraints
 

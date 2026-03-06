@@ -50,6 +50,8 @@ Better alternatives:
 
 ```
 User Query
+    ↓ Language Detection (EN/FR)
+    ↓ Query Normalization (canonical tokens)
     ↓ IntentParser
 Structured FoodQuery
     ↓ OFFDataAdapter  (Open Food Facts API)

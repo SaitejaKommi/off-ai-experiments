@@ -12,6 +12,7 @@ Modules:
 from .intent_parser import IntentParser, FoodQuery
 from .data_adapter import OFFDataAdapter, Product
 from .insight_engine import InsightEngine, ProductInsight
+from .query_preprocessor import QueryPreprocessor
 from .recommendation_engine import RecommendationEngine, Recommendation
 from .pipeline import FoodIntelligencePipeline
 
@@ -22,6 +23,7 @@ __all__ = [
     "Product",
     "InsightEngine",
     "ProductInsight",
+    "QueryPreprocessor",
     "RecommendationEngine",
     "Recommendation",
     "FoodIntelligencePipeline",

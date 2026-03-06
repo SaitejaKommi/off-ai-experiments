@@ -89,11 +89,11 @@ class TestPassesConstraints:
         c = NutrientConstraint("proteins_100g", ">=", 10.0, "g")
         assert p.passes_constraints([c]) is False
 
-    def test_missing_nutrient_passes(self):
-        """Missing nutrient data should not filter out the product."""
+    def test_missing_nutrient_fails(self):
+        """Missing nutrient data should fail an explicit constraint."""
         p = self._make_product({})
         c = NutrientConstraint("proteins_100g", ">=", 10.0, "g")
-        assert p.passes_constraints([c]) is True
+        assert p.passes_constraints([c]) is False
 
     def test_multiple_constraints_all_pass(self):
         p = self._make_product({
@@ -145,3 +145,13 @@ class TestProductSerialization:
         p = Product(barcode="1", name="X", nutrients={"fat_100g": 5.0})
         assert p.nutrient("fat_100g") == 5.0
         assert p.nutrient("missing_key") is None
+
+    def test_has_excluded_ingredient(self):
+        p = Product(
+            barcode="1",
+            name="X",
+            ingredients_text="cocoa butter, sugar, palm oil",
+            ingredients_tags=["en:palm-oil"],
+        )
+        assert p.has_excluded_ingredient(["palm oil"]) is True
+        assert p.has_excluded_ingredient(["soy"]) is False

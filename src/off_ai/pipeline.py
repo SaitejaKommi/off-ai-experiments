@@ -22,6 +22,7 @@ from typing import List, Optional
 from .data_adapter import OFFDataAdapter, Product
 from .insight_engine import InsightEngine, ProductInsight
 from .intent_parser import FoodQuery, IntentParser
+from .query_preprocessor import QueryPreprocessor
 from .recommendation_engine import Recommendation, RecommendationEngine
 
 
@@ -115,6 +116,7 @@ class FoodIntelligencePipeline:
         max_results: int = 10,
     ) -> None:
         self._parser = IntentParser()
+        self._preprocessor = QueryPreprocessor()
         self._adapter = adapter or OFFDataAdapter()
         self._insight_engine = InsightEngine()
         self._rec_engine = RecommendationEngine()
@@ -126,8 +128,14 @@ class FoodIntelligencePipeline:
 
     def run(self, user_query: str) -> PipelineResult:
         """Execute the full pipeline for *user_query*."""
-        # 1. Parse intent
-        query = self._parser.parse(user_query)
+        # 1. Detect language + normalize EN/FR text
+        pre = self._preprocessor.preprocess(user_query)
+
+        # 2. Parse normalized query into structured intent
+        query = self._parser.parse(pre.normalized_text)
+        query.raw_text = user_query
+        query.detected_language = pre.language
+        query.normalized_text = pre.normalized_text
         query.max_results = self.max_results
         result = PipelineResult(query=query)
 
@@ -158,6 +166,19 @@ class FoodIntelligencePipeline:
         products = self._adapter.search(query)
         result.products = products
         result.insights = [self._insight_engine.analyze(p) for p in products]
+        
+        # Sort results by health classification (best to worst)
+        classification_rank = {
+            "Excellent": 4,
+            "Good": 3,
+            "Moderate": 2,
+            "Risky": 1,
+        }
+        result.insights.sort(
+            key=lambda insight: classification_rank.get(insight.health_classification, 0),
+            reverse=True
+        )
+        
         return result
 
     def _run_comparison(

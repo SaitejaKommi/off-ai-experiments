@@ -29,6 +29,7 @@ _PRODUCT_FIELDS = (
     "product_name,brands,categories,categories_tags,"
     "nutriscore_grade,nova_group,"
     "nutriments,"
+    "ingredients_text,ingredients_tags,"
     "additives_tags,additives_n,"
     "labels,labels_tags,"
     "ecoscore_grade,"
@@ -65,6 +66,10 @@ class Product:
     # Labels (vegan, organic, …)
     labels: List[str] = field(default_factory=list)
 
+    # Ingredients
+    ingredients_text: str = ""
+    ingredients_tags: List[str] = field(default_factory=list)
+
     # Links
     image_url: str = ""
     product_url: str = ""
@@ -79,7 +84,7 @@ class Product:
         for c in constraints:
             value = self.nutrient(c.nutrient)
             if value is None:
-                continue  # missing data – don't filter out
+                return False  # explicit constraint requires available nutrient data
             if c.operator == ">=" and value < c.value:
                 return False
             if c.operator == "<=" and value > c.value:
@@ -105,9 +110,23 @@ class Product:
             "additives": self.additives,
             "additives_count": self.additives_count,
             "labels": self.labels,
+            "ingredients_text": self.ingredients_text,
+            "ingredients_tags": self.ingredients_tags,
             "image_url": self.image_url,
             "product_url": self.product_url,
         }
+
+    def has_excluded_ingredient(self, excluded_ingredients: List[str]) -> bool:
+        """Return True if product appears to contain any excluded ingredient."""
+        if not excluded_ingredients:
+            return False
+
+        haystack = " ".join(self.ingredients_tags + [self.ingredients_text]).lower()
+        for ingredient in excluded_ingredients:
+            token = ingredient.lower().strip()
+            if token and token in haystack:
+                return True
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +154,11 @@ def _parse_product(raw: Dict[str, Any]) -> Product:
     label_tags: List[str] = raw.get("labels_tags") or []
     labels = [re.sub(r"^[a-z]{2}:", "", t) for t in label_tags]
 
+    # Ingredient tags / text
+    ingredient_tags_raw: List[str] = raw.get("ingredients_tags") or []
+    ingredient_tags = [re.sub(r"^[a-z]{2}:", "", t) for t in ingredient_tags_raw]
+    ingredients_text = str(raw.get("ingredients_text") or "")
+
     # Additive tags
     additives_raw: List[str] = raw.get("additives_tags") or []
     additives = [a.upper().replace("en:", "") for a in additives_raw]
@@ -151,6 +175,8 @@ def _parse_product(raw: Dict[str, Any]) -> Product:
         additives=additives,
         additives_count=int(raw.get("additives_n") or len(additives)),
         labels=labels,
+        ingredients_text=ingredients_text,
+        ingredients_tags=ingredient_tags,
         image_url=raw.get("image_url", ""),
         product_url=raw.get("url", ""),
     )
@@ -199,6 +225,11 @@ class OFFDataAdapter:
         # Apply nutrient constraints locally (OFF API filtering is coarse)
         if query.nutrient_constraints:
             products = [p for p in products if p.passes_constraints(query.nutrient_constraints)]
+
+        if query.excluded_ingredients:
+            products = [
+                p for p in products if not p.has_excluded_ingredient(query.excluded_ingredients)
+            ]
         return products
 
     def get_product(self, barcode: str) -> Optional[Product]:
@@ -220,9 +251,10 @@ class OFFDataAdapter:
         category: str,
         max_results: int = 30,
     ) -> List[Product]:
-        """Fetch products from a specific OFF category."""
+        """Fetch products from a specific OFF category (Canada only)."""
         params = {
             "categories_tags": category,
+            "countries_tags": "en:Canada",  # Filter for Canadian products only
             "fields": _PRODUCT_FIELDS,
             "page_size": self.page_size,
             "sort_by": "nutriscore_score",
@@ -242,6 +274,7 @@ class OFFDataAdapter:
             "page_size": self.page_size,
             "action": "process",
             "json": "1",
+            "countries_tags": "en:Canada",  # Filter for Canadian products only
         }
 
         # Free-text search from the original query (minus structural keywords)
