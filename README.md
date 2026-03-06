@@ -1,160 +1,145 @@
 # off-ai-experiments
-Open Food Facts Intelligent Search &amp; Insights Experiments
 
-## What This Project Does
+Beginner-friendly food search assistant built on Open Food Facts.
 
-This repository explores how raw food databases can evolve into an **AI-augmented food intelligence engine**.
+It lets users ask natural-language questions like:
+- `high protein snack under 200 calories`
+- `healthier alternative to nutella`
+- `céréales faibles en sucre`
 
-Three core capabilities are implemented:
+and returns structured, explainable product results.
 
-### 1. Natural Language → Structured Food Queries
+## What this project does
 
-Users can ask complex questions and the system translates them into structured constraints over the Open Food Facts dataset.
+This project turns a plain user query into:
+1. Parsed nutrition intent (constraints/tags/category)
+2. Filtered products from Open Food Facts
+3. Health insights for each product
+4. Better alternatives (comparison mode)
 
-```
-User query:  "High protein vegan snack under 200 calories"
+## Data source (API used)
 
-Structured interpretation:
-  category = snacks
-  proteins_100g >= 10 g
-  vegan = true
-  energy-kcal_100g <= 200 kcal
-```
+We use **Open Food Facts v2 API**:
+- Search endpoint: `https://world.openfoodfacts.org/api/v2/search`
+- Product endpoint: `https://world.openfoodfacts.org/api/v2/product/{barcode}.json`
 
-### 2. Automated Product Insight Engine
+Where in code:
+- `src/off_ai/data_adapter.py`
 
-Product data is automatically converted into interpretable health insights:
+## How data is processed (easy view)
 
-- **Risk indicators** – High sodium, Ultra-processed (NOVA 4), Contains additive E471, …
-- **Positive indicators** – High protein, High fibre, Minimally processed, Organic, …
-- **Health classification** – Excellent / Good / Moderate / Risky
+You can think of the system as a pipeline that “segments” raw API data into useful layers:
 
-### 3. Intelligent Food Recommendation System
+1. **Input understanding**
+    - Detect language (EN/FR)
+    - Normalize terms (example: `faibles en sucre` → `low sugar`)
+2. **Intent parsing**
+    - Extract category, dietary tags, nutrient constraints
+    - Example: `under 200 calories` → `energy-kcal_100g <= 200`
+3. **API retrieval + filtering**
+    - Fetch candidates from Open Food Facts
+    - Apply strict nutrient/ingredient filters locally
+4. **Smart fallback**
+    - If no products are found, relax least-important constraints and retry
+5. **Insights + recommendations**
+    - Generate risk/positive indicators and health class
+    - Optionally suggest better alternatives
 
-Given a reference product the system finds better-rated alternatives:
+## Input → Output (for users)
 
-```
-User: "Healthier alternative to Nutella"
+### Example 1: Search mode
 
-Better alternatives:
-1. Organic Peanut Butter
-   Nutri-Score B  |  NOVA 2
-   → Better Nutri-Score (B vs E)
-   → 40% less sugar
-   → 2 fewer additives
-```
-
----
-
-## Architecture
-
-```
-User Query
-    ↓ Language Detection (EN/FR)
-    ↓ Query Normalization (canonical tokens)
-    ↓ IntentParser
-Structured FoodQuery
-    ↓ OFFDataAdapter  (Open Food Facts API)
-List[Product]
-    ↓ InsightEngine
-List[ProductInsight]
-    ↓ RecommendationEngine  (when comparison mode)
-PipelineResult  →  Human-Readable Explanation
+Input:
+```bash
+python -m off_ai "high protein snack under 200 calories"
 ```
 
----
+Output includes:
+- Query interpretation (detected language + parsed constraints)
+- Top matching products
+- Product insights (e.g., Nutri-Score, NOVA, risk indicators)
+- If needed: constraint relaxation log
 
-## Quick Start
+### Example 2: French query
 
-### Install
+Input:
+```bash
+python -m off_ai "céréales faibles en sucre"
+```
+
+Typical parsed constraint:
+- `sugars_100g <= 5.0 g`
+
+### Example 3: Comparison mode
+
+Input:
+```bash
+python -m off_ai "healthier alternative to nutella"
+```
+
+Output includes:
+- Reference product details
+- Better alternatives with improvement reasons
+
+## Quick start
+
+### 1) Install
 
 ```bash
 pip install -e .
 ```
 
-### CLI
+### 2) Run from CLI
 
 ```bash
-# Search for matching products
-off-ai "High protein vegan snack under 200 calories"
-off-ai "Low sodium cereal for diabetics"
-
-# Find a healthier alternative
-off-ai "Healthier alternative to Nutella"
-
-# JSON output
+off-ai "low sodium cereal for kids"
 off-ai --json "organic high fibre cereal"
-
-# Module form
 python -m off_ai "keto low carb bread"
 ```
 
-### Python API
+## Python usage
 
 ```python
 from off_ai import FoodIntelligencePipeline
 
-pipeline = FoodIntelligencePipeline()
-result = pipeline.run("High protein vegan snack under 200 calories")
+pipeline = FoodIntelligencePipeline(max_results=10)
+result = pipeline.run("high protein vegan snack under 200 calories")
 print(result)
 ```
 
-```python
-from off_ai import IntentParser, InsightEngine, OFFDataAdapter
+## Project structure
 
-# Parse a query
-parser = IntentParser()
-query = parser.parse("low sodium cereal under 150 calories")
-print(query)
-
-# Fetch and score a single product
-adapter = OFFDataAdapter()
-product = adapter.get_product("3017620422003")  # Nutella barcode
-
-engine = InsightEngine()
-insight = engine.analyze(product)
-print(insight)
-```
-
----
-
-## Project Structure
-
-```
+```text
 src/off_ai/
-├── __init__.py             # public API exports
-├── intent_parser.py        # NL → FoodQuery (rule-based, LLM-ready)
-├── data_adapter.py         # Open Food Facts API wrapper
-├── insight_engine.py       # product health scoring &amp; risk indicators
-├── recommendation_engine.py # alternative product discovery
-├── pipeline.py             # end-to-end orchestration
-└── cli.py                  # command-line interface
+  __init__.py
+  __main__.py
+  cli.py
+  query_preprocessor.py      # EN/FR detection + normalization
+  intent_parser.py           # NL query -> FoodQuery
+  data_adapter.py            # Open Food Facts API wrapper
+  insight_engine.py          # product-level health insights
+  recommendation_engine.py   # better alternative ranking
+  pipeline.py                # orchestration end-to-end
 
 tests/
-├── test_intent_parser.py
-├── test_data_adapter.py
-├── test_insight_engine.py
-└── test_recommendation_engine.py
+  test_query_preprocessor.py
+  test_intent_parser.py
+  test_data_adapter.py
+  test_insight_engine.py
+  test_recommendation_engine.py
 ```
 
----
-
-## Running Tests
+## Running tests
 
 ```bash
-pip install pytest
 pytest tests/
 ```
 
----
+Current status: all tests passing.
 
-## Research Status
+## Notes for beginners
 
-This is an experimental environment for evaluating AI-augmented food search approaches before proposing implementations within the Open Food Facts ecosystem.
-
-Future experiments may include:
-- LLM-powered intent parsing
-- Embedding-based food similarity search
-- Conversational nutrition assistants
-- Knowledge-graph reasoning over food data
+- This project is **rule-based and explainable** (not a black-box ML model).
+- API data quality can vary (some products have missing nutrient fields).
+- Filtering is strict first, then graceful fallback relaxation if needed.
 
