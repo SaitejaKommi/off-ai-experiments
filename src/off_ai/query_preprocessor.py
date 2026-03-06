@@ -38,26 +38,56 @@ class QueryPreprocessor:
     """Detect query language and normalize EN/FR phrases to canonical tokens."""
 
     _FR_REPLACEMENTS: Dict[str, str] = {
+        # Cereals/grains
         "cereales": "cereals",
         "cereale": "cereal",
         "muesli": "muesli",
         "chocolat": "chocolate",
+        
+        # Palm oil
         "huile de palme": "palm oil",
         "sans huile de palme": "no palm oil",
+        
+        # Zero sugar variants
         "sans sucre": "zero sugar",
         "sans sucre ajoute": "zero added sugar",
         "sans sucre ajoutee": "zero added sugar",
         "sans sucres ajoutes": "zero added sugar",
         "sans sucre ajoutes": "zero added sugar",
+        
+        # Low fat variants (singular & plural)
+        "faibles en gras": "low fat",
         "faible en gras": "low fat",
+        "faibles en graisse": "low fat",
+        "faible en graisse": "low fat",
         "moins de gras": "low fat",
         "moins gras": "low fat",
+        
+        # Low sugar variants (singular & plural)
+        "faibles en sucre": "low sugar",
         "faible en sucre": "low sugar",
+        
+        # High protein variants (singular & plural)
+        "riches en proteines": "high protein",
         "riche en proteines": "high protein",
+        "riches en proteine": "high protein",
+        "riche en proteine": "high protein",
+        
+        # High fibre variants (singular & plural)
+        "riches en fibres": "high fibre",
         "riche en fibres": "high fibre",
+        "riches en fibre": "high fibre",
+        "riche en fibre": "high fibre",
+        
+        # Dietary labels
         "vegetalien": "vegan",
+        "vegetalienne": "vegan",
+        "vegetaliens": "vegan",
         "vegetarien": "vegetarian",
+        "vegetarienne": "vegetarian",
+        "vegetariens": "vegetarian",
         "biologique": "organic",
+        "biologiques": "organic",
     }
 
     _TYPO_REPLACEMENTS: Dict[str, str] = {
